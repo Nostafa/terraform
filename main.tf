@@ -1,7 +1,7 @@
 # provider "aws" {
 #   region = "eu-west-3a"
-#   # access_key = "AKIAYRZFKQVL2LBWSQZ3"
-#   # secret_key = "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"
+#   access_key = "AKIAYRZFKQVL2ZDKB6T4"
+#   secret_key = "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"
 # }
 provider "aws" {
   region  = "eu-west-3"
@@ -12,41 +12,121 @@ provider "aws" {
 #   instance_type = "t2.micro"
 # }
 
-variable "subnet_cidr_block" {
-  description = "cidr block for subnet "
-}
-
-variable "vpc_cidr_block" {
+variable vpc_cidr_block {
   description = "cidr block for vpc"
 }
+variable subnet_cidr_block {
+  description = "cidr block for subnet "
+}
+variable avail_zone{}
+variable env_prefix {}
+variable my_ip {}
+variable instance_type {}
 
-resource "aws_vpc" "development-vpc"{
+resource "aws_vpc" "myapp-vpc"{
   cidr_block = var.vpc_cidr_block 
   tags = {
-    Name: "development",
-    vpc_env: "dev"
-  }
+    Name: "${var.env_prefix}-vpc"  
+    }
 }
 
-resource "aws_subnet" "dev-subnet-1" {
-  vpc_id = aws_vpc.development-vpc.id
+resource "aws_subnet" "myapp-subnet-1" {
+  vpc_id = aws_vpc.myapp-vpc.id
   cidr_block = var.subnet_cidr_block
-  availability_zone = "eu-west-3a"
+  availability_zone = var.avail_zone
   tags= {
-    Name: "subnet-1-dev"
+    Name: "${var.env_prefix}-subnet"
   }
 }
 
-data "aws_vpc" "existing_vpc"{
-  default = true
 
+resource "aws_route_table" "myapp-route-table" {
+  vpc_id = aws_vpc.myapp-vpc.id
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.myapp-internet-gateway.id
+  }
+  tags = {
+    Name = "${var.env_prefix}-route-table", 
+  }
 }
 
-resource "aws_subnet" "dev-subnet-2" {
-  vpc_id = data.aws_vpc.existing_vpc.id
-  cidr_block = "172.31.48.0/20"
-  availability_zone = "eu-west-3a"
-    tags= {
-    Name: "subnet-2-default"
+
+resource "aws_internet_gateway" "myapp-internet-gateway" {
+  vpc_id = aws_vpc.myapp-vpc.id
+tags = {
+    Name = "${var.env_prefix}-internet-gateway", 
+  }
+}
+
+resource "aws_route_table_association" "a-art-subnet" {
+  subnet_id = aws_subnet.myapp-subnet-1.id
+  route_table_id = aws_route_table.myapp-route-table.id
+}
+
+resource "aws_security_group" "myapp-security-group" {
+  name = "myapp-security-group"
+  vpc_id = aws_vpc.myapp-vpc.id
+  # we use ingress here to set roles for incoming requests
+  ingress {
+    from_port = 22
+    to_port = 22
+    protocol = "tcp"
+    cidr_blocks = [ var.my_ip ]
+  }
+
+    ingress {
+    from_port = 8080
+    to_port = 8080
+    protocol = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # we use agress here to set roles for outcoming requests
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = [ "0.0.0.0/0" ]
+    prefix_list_ids = [  ]
+  }
+
+  tags = {
+    Name: "${var.env_prefix}-sg"
+  }
+}
+
+# hte * is for anything after this word 
+data "aws_ami" "latest-amazon-linux-image" {
+  most_recent = true
+  # owners = ["amazon"]
+  owners = ["137112412989"]
+  filter {
+    name = "name"
+    values = [ "al2023-ami-2023.*-kernel-6.1-x86_64" ]
+  }
+  # ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-20230516
+  # filter {
+  #   name = "virtualization-type"
+  #   values = ["hvm"]
+  # }
+}
+
+output "aws_ami_id" {
+  value = data.aws_ami.latest-amazon-linux-image.id
+}
+
+
+resource "aws_instance" "backend-server" {
+  ami = data.aws_ami.latest-amazon-linux-image.id
+  instance_type =var.instance_type
+  subnet_id = aws_subnet.myapp-subnet-1.id
+  vpc_security_group_ids = [ aws_security_group.myapp-security-group.id ]
+  availability_zone = var.avail_zone
+
+  associate_public_ip_address = true
+  key_name = "backend-server-key-pair"
+  tags = {
+    Name = "${var.env_prefix}-server"
   }
 } 
