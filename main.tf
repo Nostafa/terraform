@@ -22,6 +22,8 @@ variable avail_zone{}
 variable env_prefix {}
 variable my_ip {}
 variable instance_type {}
+variable my_public_key {}
+variable my_public_key_location {}
 
 resource "aws_vpc" "myapp-vpc"{
   cidr_block = var.vpc_cidr_block 
@@ -105,17 +107,20 @@ data "aws_ami" "latest-amazon-linux-image" {
     name = "name"
     values = [ "al2023-ami-2023.*-kernel-6.1-x86_64" ]
   }
-  # ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-20230516
-  # filter {
-  #   name = "virtualization-type"
-  #   values = ["hvm"]
-  # }
 }
 
 output "aws_ami_id" {
   value = data.aws_ami.latest-amazon-linux-image.id
 }
+# output "aws_ami_id_output" {
+#   value = data.aws_ami.latest-amazon-linux-image.id
+# }
 
+resource "aws_key_pair" "ssh-key-pair" {
+  key_name = "backend-key-pair"
+  # public_key = var.my_public_key
+public_key = file(var.my_public_key_location)
+}
 
 resource "aws_instance" "backend-server" {
   ami = data.aws_ami.latest-amazon-linux-image.id
@@ -124,9 +129,12 @@ resource "aws_instance" "backend-server" {
   vpc_security_group_ids = [ aws_security_group.myapp-security-group.id ]
   availability_zone = var.avail_zone
 
+  user_data = file("start-server.sh")
+
   associate_public_ip_address = true
-  key_name = "backend-server-key-pair"
+  key_name = aws_key_pair.ssh-key-pair.key_name
   tags = {
     Name = "${var.env_prefix}-server"
+    type = "backend server"
   }
 } 
